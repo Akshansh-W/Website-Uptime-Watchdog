@@ -23,6 +23,24 @@ async function getUserForMonitor(userId) {
   return rows[0] || null;
 }
 
+function serializeMonitor(monitor) {
+  return {
+    id: monitor.id,
+    userId: monitor.user_id,
+    url: monitor.url,
+    label: monitor.label,
+    status: monitor.status,
+    uptime: monitor.uptime,
+    responseTime: monitor.response_time,
+    lastChecked: monitor.last_checked ? new Date(monitor.last_checked).toISOString() : 'Never',
+    alertEmail: monitor.alert_email,
+    alertSlack: monitor.alert_slack,
+    checkInterval: monitor.check_interval,
+    createdAt: monitor.created_at,
+    history: monitor.history || [],
+  };
+}
+
 // ── REST API ──────────────────────────────────────────────────────────────────
 
 // GET /api/monitors
@@ -33,7 +51,7 @@ async function getMonitors(req, res) {
       [req.user.id]
     );
     for (const m of monitors) m.history = await getHistory(m.id);
-    res.json(monitors);
+    res.json(monitors.map(serializeMonitor));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch monitors.' });
@@ -62,7 +80,7 @@ async function createMonitor(req, res) {
     scheduleMonitor(monitor);
     pingMonitor(monitor).catch(console.error);
 
-    res.status(201).json(monitor);
+    res.status(201).json(serializeMonitor(monitor));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create monitor.' });
@@ -99,7 +117,7 @@ async function manualPing(req, res) {
 
     const [updated] = await pool.query('SELECT * FROM monitors WHERE id = ?', [req.params.id]);
     updated[0].history = await getHistory(req.params.id);
-    res.json(updated[0]);
+    res.json(serializeMonitor(updated[0]));
   } catch (err) {
     res.status(500).json({ error: 'Ping failed.' });
   }
@@ -154,8 +172,12 @@ async function pingMonitor(monitor) {
 
   // ── Broadcast live update via SSE ─────────────────────────────────────────
   broadcastToUser(monitor.user_id, 'monitor_update', {
-    id: monitor.id, status: newStatus, response_time: responseTime,
-    last_checked: new Date().toISOString(), uptime, history,
+    id: monitor.id,
+    status: newStatus,
+    responseTime,
+    lastChecked: new Date().toISOString(),
+    uptime,
+    history,
   });
 
   // ── Run API checks attached to this monitor ───────────────────────────────
